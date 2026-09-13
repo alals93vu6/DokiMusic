@@ -1,0 +1,56 @@
+# Python environments and generated caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Local configuration / credentials
+.env
+.env.*
+!.env.example
+runtime-path.txt
+.codex/
+.agents/
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+
+# Models and user audio are downloaded/generated locally
+*.ckpt
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.sf2
+*.mp3
+!/outputs/KeyScore/assets/demo.mp3
+*.wav
+*.flac
+*.ogg
+*.m4a
+*.log
+*.part
+
+# Keep reproducible scripts, not local analysis/export results
+/work/*
+!/work/keyscore/
+/work/keyscore/*
+!/work/keyscore/test_*.py
+!/work/keyscore/test_*.cjs
+!/work/keyscore/benchmark_isolation.py
+!/work/keyscore/fetch_audiosep.py
+!/work/keyscore/prepare_audiosep.py
+!/work/keyscore/write_validation.py
+/outputs/*
+!/outputs/KeyScore/
+/outputs/KeyScore/ui_verified_cello.py
+/outputs/KeyScore/*_play.py

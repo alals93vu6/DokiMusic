@@ -1,0 +1,13 @@
+{
+  "source_repo": "https://github.com/Audio-AGI/AudioSep",
+  "source_revision": "944583f18b84589dc965de3ad77525c945334252",
+  "weights_repo": "https://huggingface.co/spaces/Audio-AGI/AudioSep",
+  "weights_revision": "0807a713283035d8b0d0628f1b8e3d6580459f7b",
+  "weights_sha256": "f8cda01bfd0ebd141eef45d41db7a3ada23a56568465840d3cff04b8010ce82c",
+  "weights_size": 1264844076,
+  "roberta_revision": "e2da8e2f811d1448a5b465c236feacd80ffbac7b",
+  "source_license": "MIT",
+  "adaptations": [
+    "Relative base import only. Inference uses original ResUNet30 architecture."
+  ]
+}
