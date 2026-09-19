@@ -9,6 +9,17 @@ from exporter import generate
 from arrangement import arrange
 
 class Tests(unittest.TestCase):
+    def test_four_instrument_round_trip(self):
+        for mode in ('piano', 'cello', 'violin', 'harp'):
+            with self.subTest(mode=mode):
+                data=self.sample()
+                data['settings']['mode']=mode
+                source=generate('test',score_result(data))
+                restored=read_score(source)
+                self.assertEqual(restored['settings']['mode'],mode)
+                self.assertEqual(restored['notes'][0]['s'],1)
+                self.assertEqual(restored['notes'][0]['p'],60)
+
     def sample(self):
         return dict(version=1,title='測試',settings={},notes=[dict(s=1,e=2,k='A',v=.8),dict(s=1,e=3,k='D',v=.7)])
     def test_round_trip_preserves_events_and_leading_silence(self):

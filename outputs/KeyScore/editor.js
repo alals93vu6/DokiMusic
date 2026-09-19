@@ -1,5 +1,7 @@
 'use strict';
+const referenceAudio={buffer:null,name:'',volume:.5,muted:false,offset:0,gain:null,loading:0};
 const editor={score:null,selected:-1,undo:[],redo:[],dirty:false,drag:null};
+editor.tracks=[];editor.active=-1;editor.clipboard=[];editor.compare=false;
 editor.selection=new Set();editor.boxMode=false;editor.box=null;
 function clearScoreSelection(){editor.selected=-1;editor.selection.clear();editor.boxMode=false;editor.box=null;}
 const scorePlayback={position:0,ctx:null,raf:0,generation:0,origin:0,start:0,end:0,seeking:false};
@@ -14,6 +16,8 @@ function replaceScore(score){
   if(editor.dirty&&!confirm('目前的修改尚未匯出。要改載入另一份樂譜嗎？'))return;
   stopScorePlayback();scorePlayback.position=0;
   editor.score=cloneScore(score);clearScoreSelection();editor.undo=[];editor.redo=[];editor.dirty=false;
+  if(editor.active<0){editor.active=0;editor.tracks.push({});}
+  Object.assign(editor.tracks[editor.active],{score:editor.score,comparison:null,muted:false});editor.compare=false;
   $('scoreTitle').value=score.title;$('scoreCountdown').value=score.settings.countdown;drawScore();
 }
 $('newScore').onclick=()=>replaceScore({version:1,title:'未命名樂譜',settings:options(),notes:[]});
@@ -21,8 +25,8 @@ $('useAnalysis').onclick=()=>{if(!state.result||state.dirty||state.busy){toast('
 $('importScore').onclick=async()=>{try{const r=await call('import_score');if(!r.cancelled)replaceScore(r.score);}catch(e){toast(e.message,true);}};
 $('saveScore').onclick=async()=>{
   if(!editor.score){toast('請先建立或載入樂譜。',true);return;}
-  const snapshot=JSON.stringify(editor.score);$('saveScore').disabled=true;
-  try{const r=await call('export_score',cloneScore(editor.score));if(!r.cancelled){if(JSON.stringify(editor.score)===snapshot)editor.dirty=false;toast('已儲存：'+r.path);drawScore();}}catch(e){toast(e.message,true);}finally{$('saveScore').disabled=false;}
+  const target=editor.tracks[editor.active],snapshot=JSON.stringify(editor.score);$('saveScore').disabled=true;
+  try{const r=await call('export_score',cloneScore(editor.score));if(!r.cancelled){if(JSON.stringify(target.score)===snapshot){target.dirty=false;if(editor.tracks[editor.active]===target)editor.dirty=false;}toast('已儲存：'+r.path);drawScore();}}catch(e){toast(e.message,true);}finally{$('saveScore').disabled=false;}
 };
 for(const [id,field] of [['scoreTitle','title'],['scoreCountdown','countdown']])$(id).onchange=()=>{if(!editor.score)return;remember();if(field==='title')editor.score.title=$(id).value;else editor.score.settings.countdown=Number($(id).value);drawScore();};
 function historyScore(from,to){if(!from.length)return;stopScorePlayback();to.push(JSON.stringify(editor.score));editor.score=JSON.parse(from.pop());clearScoreSelection();editor.dirty=true;$('scoreTitle').value=editor.score.title;$('scoreCountdown').value=editor.score.settings.countdown;drawScore();}
@@ -31,6 +35,7 @@ $('redoScore').onclick=()=>historyScore(editor.redo,editor.undo);
 const svgNS='http://www.w3.org/2000/svg';
 function svgElement(name,attrs,text){const el=document.createElementNS(svgNS,name);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;return el;}
 function drawScore(){
+  syncTrack();renderTracks();
   const svg=$('scoreGrid');svg.replaceChildren();const score=editor.score,zoom=Number($('scoreZoom').value);
   $('undoScore').disabled=!editor.undo.length;$('redoScore').disabled=!editor.redo.length;
   const batch=editor.boxMode;
@@ -40,14 +45,16 @@ function drawScore(){
   $('deleteNote').textContent=batch?`刪除框選 ${editor.selection.size} 音`:'刪除選取音符';
   $('batchTools').hidden=!batch;$('moveBatch').disabled=!editor.selection.size;
   $('scoreStatus').textContent=score?`${score.notes.length} 個音符${editor.dirty?' · 尚未匯出':''}`:'尚未載入樂譜。';
-  if(batch)$('scoreStatus').textContent+=` · 框選 ${editor.selection.size} 音（僅移動／刪除）`;
-  const duration=score?Math.max(15,...score.notes.map(n=>n.e+2)):15,width=Math.max(900,64+duration*zoom);
+  if(batch)$('scoreStatus').textContent+=` · 框選 ${editor.selection.size} 音（可複製／移動／刪除）`;
+  const duration=Math.max(15,scoreEnd()+2),width=Math.max(900,64+duration*zoom);
   svg.setAttribute('width',width);svg.setAttribute('viewBox',`0 0 ${width} 474`);
   const root=score?.settings.root||60;
   $('noteKey').replaceChildren(...[...keyOrder].map((k,i)=>new Option(`${k} · ${noteName(root+scaleSteps[i])}`,k)));
   for(let i=0;i<15;i++){const y=24+(14-i)*30;svg.append(svgElement('rect',{x:0,y,width,height:30,fill:i%2?'#18221f':'#111a17'}));svg.append(svgElement('text',{x:5,y:y+20,fill:'#a5bead','font-size':11},keyOrder[i]+' '+noteName(root+scaleSteps[i])));}
   const tick=zoom>=80?1:2;
   for(let t=0;t<=duration;t+=tick){const x=64+t*zoom;svg.append(svgElement('line',{x1:x,x2:x,y1:24,y2:474,stroke:'#304139'}));svg.append(svgElement('text',{x:x+2,y:16,fill:'#a5bead','font-size':11},t+'s'));}
+  const comparison=editor.tracks[editor.active]?.comparison;
+  if(comparison)comparison.notes.forEach(n=>{const row=keyOrder.indexOf(n.k);svg.append(svgElement('rect',{x:64+n.s*zoom,y:24+(14-row)*30+1,width:Math.max(4,(n.e-n.s)*zoom),height:28,fill:'#c6a5ff',opacity:.28,'pointer-events':'none'}));});
   if(score)score.notes.forEach((n,i)=>{const x=64+n.s*zoom,y=24+(14-keyOrder.indexOf(n.k))*30+3,w=Math.max(4,(n.e-n.s)*zoom);svg.append(svgElement('rect',{x,y,width:w,height:24,rx:3,fill:(batch?editor.selection.has(i):i===editor.selected)?'#e1f4a8':'#79cfc2','data-note':i}));if(!batch)svg.append(svgElement('rect',{x:x+Math.max(0,w-6),y,width:Math.min(w,6),height:24,fill:'#466859','data-note':i,'data-resize':'1'}));});
   if(editor.box){const b=editor.box;svg.append(svgElement('rect',{x:Math.min(b.a.x,b.b.x),y:Math.min(b.a.y,b.b.y),width:Math.abs(b.a.x-b.b.x),height:Math.abs(b.a.y-b.b.y),fill:'#a6dca522',stroke:'#d8f5a0','stroke-dasharray':'4 3','pointer-events':'none'}));}
   const n=score?.notes[editor.selected];if(n){$('noteKey').value=n.k;$('noteStart').value=n.s;$('noteLength').value=+(n.e-n.s).toFixed(3);}
@@ -83,7 +90,7 @@ $('scoreGrid').onpointermove=e=>{const d=editor.drag;if(!d)return;const p=gridPo
 $('scoreGrid').onpointerup=()=>{const wasSeeking=scorePlayback.seeking;scorePlayback.seeking=false;if(wasSeeking)finishSeek();const d=editor.drag;if(!d)return;if(d.box){editor.box=null;if(!d.moved)clearScoreSelection();editor.drag=null;drawScore();return;}if(d.snapshot!==JSON.stringify(editor.score)){editor.undo.push(d.snapshot);if(editor.undo.length>50)editor.undo.shift();editor.redo=[];editor.dirty=true;}editor.drag=null;drawScore();};
 $('scoreGrid').onpointercancel=()=>{if(scorePlayback.seeking)stopScorePlayback();scorePlayback.seeking=false;const d=editor.drag;if(d){if(d.box){editor.selection=new Set(d.previous);editor.boxMode=d.previousMode;editor.selected=d.previousSingle;editor.box=null;}else editor.score=JSON.parse(d.snapshot);editor.drag=null;drawScore();}};
 $('scoreGrid').onkeydown=e=>{if(e.key==='Delete'){e.preventDefault();$('deleteNote').click();}};
-function scoreEnd(){return editor.score?editor.score.notes.reduce((m,n)=>Math.max(m,n.e),0):0;}
+function scoreEnd(){syncTrack();return editor.tracks.reduce((end,t)=>Math.max(end,...t.score.notes.map(n=>n.e),...(t.comparison?.notes||[]).map(n=>n.e)),referenceAudio.buffer?Math.max(0,referenceAudio.buffer.duration-referenceAudio.offset):0);}
 function updateScoreCursor(){
   const end=scoreEnd(),limit=Math.max(15,end+2);scorePlayback.position=Math.max(0,Math.min(limit,scorePlayback.position));
   const x=64+scorePlayback.position*Number($('scoreZoom').value);
@@ -96,6 +103,7 @@ function updateScoreCursor(){
 }
 function stopScorePlayback(keepEnabled=false){
   if(keepEnabled!==true){scorePlayback.enabled=false;closeScrub();}
+  referenceAudio.gain=null;
   const p=scorePlayback;if(p.ctx){p.position=Math.min(p.end,p.start+Math.max(0,p.ctx.currentTime-p.origin));p.ctx.close().catch(()=>{});p.ctx=null;}
   p.generation++;cancelAnimationFrame(p.raf);p.raf=0;updateScoreCursor();
 }
@@ -108,16 +116,17 @@ $('scoreGrid').addEventListener('pointermove',e=>{if(scorePlayback.seeking)seekS
 function previewSegments(notes,position){return notes.filter(n=>n.e>position).map(n=>({...n,s:Math.max(n.s,position)-position,e:n.e-position})).sort((a,b)=>a.s-b.s);}
 $('scorePlay').onclick=async()=>{if(scorePlayback.enabled){stopScorePlayback();return;}scorePlayback.enabled=true;return startScorePlayback();};
 async function startScorePlayback(){
-  closeScrub();stopScorePlayback(true);stopPreview();const p=scorePlayback,end=scoreEnd();if(!p.enabled||!editor.score||p.position>=end)return;
+  closeScrub();stopScorePlayback(true);stopPreview();const p=scorePlayback,end=scoreEnd();if(!p.enabled||p.position>=end)return;
   const generation=p.generation,start=p.position,ctx=new AudioContext();p.ctx=ctx;p.start=start;p.end=end;p.origin=ctx.currentTime;updateScoreCursor();
   try{await ctx.resume();if(p.generation!==generation||p.ctx!==ctx)return;p.origin=ctx.currentTime+.05;
+    scheduleReference(ctx,p.origin,start);
     const master=ctx.createGain();master.gain.value=.045;master.connect(ctx.destination);
-    const notes=previewSegments(editor.score.notes,start);let index=0;
+    const notes=previewSegments(playbackNotes(),start);let index=0;
     function frame(){if(p.ctx!==ctx)return;const elapsed=Math.max(0,ctx.currentTime-p.origin);
       while(index<notes.length&&notes[index].s<=elapsed+.25){const n=notes[index++];if(n.e<=elapsed)continue;
-        const s=Math.max(ctx.currentTime,p.origin+n.s),e=p.origin+n.e,osc=ctx.createOscillator(),gain=ctx.createGain(),ramp=Math.min(.015,(e-s)/3);
-        osc.type=editor.score.settings.mode==='cello'?'sawtooth':'triangle';osc.frequency.value=440*2**((n.p-69)/12);
-        gain.gain.setValueAtTime(0,s);gain.gain.linearRampToValueAtTime(Math.max(.05,Math.min(1,n.v)),s+ramp);gain.gain.setValueAtTime(Math.max(.05,Math.min(1,n.v)),e-ramp);gain.gain.linearRampToValueAtTime(0,e);
+        const s=Math.max(ctx.currentTime,p.origin+n.s),e=p.origin+n.e,osc=ctx.createOscillator(),gain=ctx.createGain(),ramp=Math.min(n.mode==='cello'?.06:n.mode==='violin'?.035:.015,(e-s)/3);
+        osc.type=voiceType(n.mode||editor.score.settings.mode);osc.frequency.value=440*2**((n.p-69)/12);
+        gain.gain.setValueAtTime(0,s);gain.gain.linearRampToValueAtTime(Math.max(.05,Math.min(1,n.v)),s+ramp);gain.gain.linearRampToValueAtTime(Math.max(.05,Math.min(1,n.v))*(['piano','harp'].includes(n.mode)? .25:1),e-ramp);gain.gain.linearRampToValueAtTime(0,e);
         osc.connect(gain);gain.connect(master);osc.onended=()=>{osc.disconnect();gain.disconnect();};osc.start(s);osc.stop(e);
       }
       p.position=Math.min(end,start+elapsed);updateScoreCursor();const x=64+p.position*Number($('scoreZoom').value),pane=$('scoreScroll');if(x>pane.scrollLeft+pane.clientWidth-30||x<pane.scrollLeft)pane.scrollLeft=Math.max(0,x-100);
@@ -133,8 +142,8 @@ async function scrubAtCursor(){
     if(scrub.ctx!==ctx||!scorePlayback.enabled)return;
     const now=ctx.currentTime;if(now-scrub.last<.05)return;scrub.last=now;
     for(const node of scrub.nodes){try{node.stop();}catch{}}scrub.nodes=[];
-    const t=scorePlayback.position,notes=editor.score.notes.filter(n=>n.s<=t&&n.e>t).slice(0,8);
-    for(const n of notes){const osc=ctx.createOscillator(),gain=ctx.createGain();osc.type=editor.score.settings.mode==='cello'?'sawtooth':'triangle';osc.frequency.value=440*2**((n.p-69)/12);
+    const t=scorePlayback.position,notes=playbackNotes().filter(n=>n.s<=t&&n.e>t).slice(0,32);
+    for(const n of notes){const osc=ctx.createOscillator(),gain=ctx.createGain();osc.type=voiceType(n.mode||editor.score.settings.mode);osc.frequency.value=440*2**((n.p-69)/12);
       const volume=.07*Math.max(.05,Math.min(1,n.v))/Math.sqrt(Math.max(1,notes.length));
       gain.gain.setValueAtTime(0,now);gain.gain.linearRampToValueAtTime(volume,now+.008);gain.gain.linearRampToValueAtTime(0,now+.10);
       osc.connect(gain);gain.connect(ctx.destination);osc.onended=()=>{osc.disconnect();gain.disconnect();};osc.start(now);osc.stop(now+.11);scrub.nodes.push(osc);
@@ -144,4 +153,124 @@ async function scrubAtCursor(){
 function finishSeek(){closeScrub();if(scorePlayback.enabled)startScorePlayback();}
 window.addEventListener('beforeunload',stopScorePlayback);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopScorePlayback();});
+
+const instrumentNames={piano:'鋼琴',cello:'大提琴',violin:'小提琴',harp:'豎琴'};
+function voiceType(mode){return {piano:'triangle',cello:'sawtooth',violin:'sawtooth',harp:'sine'}[mode]||'triangle';}
+function syncTrack(){
+  if(editor.active>=0)Object.assign(editor.tracks[editor.active],{score:editor.score,undo:editor.undo,redo:editor.redo,dirty:editor.dirty});
+}
+function playbackNotes(){
+  syncTrack();
+  const tracks=editor.tracks.length?editor.tracks:[{score:editor.score}];
+  return tracks.flatMap((t,i)=>{
+    const score=editor.compare&&i===editor.active?t.comparison:t.score;
+    return t.muted||!score?[]:score.notes.map(n=>({...n,mode:score.settings.mode}));
+  });
+}
+function renderTracks(){
+  const list=$('trackList');list.replaceChildren();
+  editor.tracks.forEach((t,i)=>{
+    const mute=document.createElement('button');mute.textContent=t.muted?'🔇':'🔊';mute.title='切換此音軌試聽';mute.setAttribute('aria-pressed',String(!t.muted));
+    mute.onclick=()=>{const playing=scorePlayback.enabled;stopScorePlayback(true);t.muted=!t.muted;drawScore();if(playing)startScorePlayback();};
+    const select=document.createElement('button');select.textContent=(i===editor.active?'● ':'')+instrumentNames[t.score.settings.mode]+' · '+t.score.title;
+    select.onclick=()=>activateTrack(i);list.append(mute,select);
+  });
+  $('switchCompare').disabled=!editor.tracks[editor.active]?.comparison;
+  $('switchCompare').textContent=editor.compare?'SWITCH · 比較組':'SWITCH · 編輯組';
+  $('switchCompare').setAttribute('aria-pressed',String(editor.compare));
+  if(editor.score)$('trackInstrument').value=editor.score.settings.mode;
+}
+function activateTrack(i){
+  const playing=scorePlayback.enabled;stopScorePlayback(true);syncTrack();
+  editor.active=i;const t=editor.tracks[i];editor.score=t.score;editor.undo=t.undo||[];editor.redo=t.redo||[];editor.dirty=!!t.dirty;editor.compare=false;clearScoreSelection();
+  $('scoreTitle').value=t.score.title;$('scoreCountdown').value=t.score.settings.countdown;drawScore();if(playing)startScorePlayback();
+}
+$('addTrack').onclick=()=>{
+  stopScorePlayback();syncTrack();
+  const mode=$('trackInstrument').value||'piano';
+  editor.tracks.push({score:{version:1,title:'未命名樂譜',settings:{...options(),mode},notes:[]},comparison:null,muted:false,undo:[],redo:[],dirty:false});
+  activateTrack(editor.tracks.length-1);
+};
+$('trackInstrument').onchange=()=>{if(!editor.score)return;remember();editor.score.settings.mode=$('trackInstrument').value;drawScore();};
+$('importComparison').onclick=async()=>{
+  if(!editor.score){toast('請先建立編輯組。',true);return;}
+  const target=editor.tracks[editor.active];
+  try{const r=await call('import_score');if(r.cancelled)return;stopScorePlayback();target.comparison=cloneScore(r.score);drawScore();}catch(e){toast(e.message,true);}
+};
+$('switchCompare').onclick=()=>{
+  if(!editor.tracks[editor.active]?.comparison)return;
+  const playing=scorePlayback.enabled;stopScorePlayback(true);editor.compare=!editor.compare;drawScore();if(playing)startScorePlayback();
+};
+function copyNotes(){
+  if(!editor.score)return;
+  const ids=editor.boxMode?[...editor.selection]:editor.selected<0?[]:[editor.selected];
+  if(!ids.length)return;
+  const notes=ids.map(i=>editor.score.notes[i]),start=Math.min(...notes.map(n=>n.s));
+  editor.clipboard=notes.map(n=>({...n,s:n.s-start,e:n.e-start}));
+}
+function pasteNotes(){
+  if(!editor.score||!editor.clipboard.length)return;
+  const start=scorePlayback.position;
+  if(editor.clipboard.some(n=>n.e+start>2400)||editor.score.notes.length+editor.clipboard.length>20000){toast('貼上後超出樂譜範圍。',true);return;}
+  remember();clearScoreSelection();editor.boxMode=true;
+  editor.clipboard.forEach(n=>{editor.selection.add(editor.score.notes.length);editor.score.notes.push({...n,s:+(n.s+start).toFixed(3),e:+(n.e+start).toFixed(3),p:editor.score.settings.root+scaleSteps[keyOrder.indexOf(n.k)]});});drawScore();
+}
+$('copyNotes').onclick=copyNotes;$('pasteNotes').onclick=pasteNotes;
+document.addEventListener('keydown',e=>{
+  if($('editorPage').hidden||editor.drag||e.target?.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target?.tagName))return;
+  if(!(e.ctrlKey||e.metaKey)||e.altKey)return;
+  const key=e.key.toLowerCase();
+  if(!['c','v','z','y'].includes(key))return;e.preventDefault();
+  if(key==='c')copyNotes();else if(key==='v')pasteNotes();else if(key==='y'||e.shiftKey)historyScore(editor.redo,editor.undo);else historyScore(editor.undo,editor.redo);
+});
+
+
+function referenceTiming(position){
+  const at=position+referenceAudio.offset;
+  return {delay:Math.max(0,-at),offset:Math.max(0,at)};
+}
+function scheduleReference(ctx,origin,position){
+  const buffer=referenceAudio.buffer;if(!buffer)return;
+  const timing=referenceTiming(position);if(timing.offset>=buffer.duration)return;
+  const source=ctx.createBufferSource(),gain=ctx.createGain();
+  source.buffer=buffer;gain.gain.value=referenceAudio.muted?0:referenceAudio.volume;
+  source.connect(gain);gain.connect(ctx.destination);referenceAudio.gain=gain;
+  source.onended=()=>{source.disconnect();gain.disconnect();if(referenceAudio.gain===gain)referenceAudio.gain=null;};
+  source.start(origin+timing.delay,timing.offset);
+}
+function updateReferenceVolume(){
+  const gain=referenceAudio.gain;
+  if(gain)gain.gain.value=referenceAudio.muted?0:referenceAudio.volume;
+  $('referenceVolumeLabel').textContent=Math.round(referenceAudio.volume*100)+'%';
+  $('referenceMute').textContent=referenceAudio.muted?'🔇 原曲靜音':'🔊 原曲開啟';
+  $('referenceMute').setAttribute('aria-pressed',String(referenceAudio.muted));
+}
+$('importReference').onclick=()=>$('referenceFile').click();
+$('referenceFile').onchange=async event=>{
+  const file=event.target.files?.[0];event.target.value='';if(!file)return;
+  if(!file.name.toLowerCase().endsWith('.mp3')||file.size>50*1024*1024||!file.size){toast('請選擇非空白且小於 50 MB 的 MP3。',true);return;}
+  const generation=++referenceAudio.loading;let ctx;
+  $('referenceName').textContent='正在載入 '+file.name+'…';
+  try{
+    ctx=new AudioContext();const buffer=await ctx.decodeAudioData(await file.arrayBuffer());
+    if(generation!==referenceAudio.loading)return;
+    if(buffer.duration>1200)throw Error('參考 MP3 最長支援 20 分鐘。');
+    stopScorePlayback();referenceAudio.buffer=buffer;referenceAudio.name=file.name;referenceAudio.offset=0;
+    $('referenceOffset').value=0;$('referenceName').textContent=file.name+' · '+buffer.duration.toFixed(2)+' 秒';drawScore();
+  }catch(error){if(generation===referenceAudio.loading){$('referenceName').textContent=referenceAudio.name||'尚未匯入原曲';toast('無法載入 MP3：'+error.message,true);}}
+  finally{if(ctx)await ctx.close();}
+};
+$('referenceVolume').oninput=e=>{referenceAudio.volume=Math.max(0,Math.min(1,Number(e.target.value)/100));updateReferenceVolume();};
+$('referenceMute').onclick=()=>{referenceAudio.muted=!referenceAudio.muted;updateReferenceVolume();};
+$('referenceOffset').onchange=e=>{
+  const value=Number(e.target.value);
+  if(!Number.isFinite(value)||Math.abs(value)>1200){e.target.value=referenceAudio.offset;toast('偏移需介於 -1200 與 1200 秒。',true);return;}
+  const playing=scorePlayback.enabled;stopScorePlayback(true);referenceAudio.offset=value;drawScore();if(playing)startScorePlayback();
+};
+$('removeReference').onclick=()=>{
+  const playing=scorePlayback.enabled;stopScorePlayback(true);referenceAudio.loading++;referenceAudio.buffer=null;referenceAudio.name='';referenceAudio.offset=0;
+  $('referenceOffset').value=0;$('referenceName').textContent='尚未匯入原曲';drawScore();if(playing)startScorePlayback();
+};
+updateReferenceVolume();
+
 drawScore();

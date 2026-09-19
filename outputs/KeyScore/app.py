@@ -204,7 +204,7 @@ class Api:
             result = score_result(data)
             source = generate(result['title'], result)
             paths = self._window.create_file_dialog(webview.FileDialog.SAVE,
-                save_filename='edited_play.py', file_types=('Python (*.py)',))
+                save_filename=result['settings']['mode']+'_edited_play.py', file_types=('Python (*.py)',))
             if not paths:
                 return dict(cancelled=True)
             path = Path(paths if isinstance(paths, str) else paths[0])
@@ -225,7 +225,9 @@ def main():
     html = html.replace('/*__EDITOR__*/', (ROOT / 'editor.js').read_text(encoding='utf-8'))
     api._window = webview.create_window('KeyScore · 樂曲轉按鍵', html=html, js_api=api,
         width=1180, height=850, min_size=(920, 680), background_color='#111517', text_select=True)
-    api._window.events.closing += api.cancel
+    def on_closing():
+        api.cancel()
+    api._window.events.closing += on_closing
     webview.start(gui='edgechromium', storage_path=str(DATA / 'webview'))
 
 

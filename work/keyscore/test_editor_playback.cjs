@@ -7,11 +7,12 @@ class AudioMock{
  constructor(){this.currentTime=0;this.nodes=[];this.closed=false;contexts.push(this);}
  async resume(){}
  async close(){this.closed=true;}
+ createBufferSource(){const node={connect(){},disconnect(){},start(t,offset){this.startTime=t;this.offset=offset;}};this.nodes.push(node);return node;}
  createGain(){return {gain:{value:0,setValueAtTime(){},linearRampToValueAtTime(){}},connect(){},disconnect(){}};}
  createOscillator(){const node={frequency:{value:0},connect(){},disconnect(){},start(t){this.startTime=t;},stop(t){this.endTime=t;}};this.nodes.push(node);return node;}
 }
 const context=vm.createContext({console,AudioContext:AudioMock,$:el,Option:function(){},
- document:{createElementNS:()=>el('svg-'+Math.random()),addEventListener(){},hidden:false},
+ document:{createElement:()=>el('html-'+Math.random()),createElementNS:()=>el('svg-'+Math.random()),addEventListener(){},hidden:false},
  window:{addEventListener(){}},keyOrder:'ASDFGHJQWERTYUI',scaleSteps:[0,2,4,5,7,9,11,12,14,16,17,19,21,23,24],noteName:String,
  state:{},options:()=>({root:60,countdown:5,mode:'piano'}),stopPreview(){},toast(m){throw Error(m);},confirm:()=>true,
  requestAnimationFrame(fn){frame=fn;return 1;},cancelAnimationFrame(){frame=null;},call:async()=>({cancelled:true})});
@@ -57,5 +58,41 @@ const run=s=>vm.runInContext(s,context);
  run("$('scoreGrid').onpointerdown(ev(80,455,0));$('scoreGrid').onpointermove(ev(160,425,0))");
  assert.equal(run('editor.score.notes[0].s'),1);assert.equal(run('editor.score.notes[0].k'),'S');
  run("$('scoreGrid').onpointercancel()");assert.equal(run('JSON.stringify(editor.score)'),beforeDrag);
+
+ run("stopScorePlayback();editor.boxMode=false;editor.selected=0;copyNotes();scorePlayback.position=8;pasteNotes()");
+ assert.equal(run('editor.score.notes.at(-1).s'),8);
+ const pasted=run('editor.score.notes.length');run('historyScore(editor.undo,editor.redo)');assert.equal(run('editor.score.notes.length'),pasted-1);
+ run("historyScore(editor.redo,editor.undo)");assert.equal(run('editor.score.notes.length'),pasted);
+ const first=run('JSON.stringify(editor.score)');
+ el('trackInstrument').value='harp';el('addTrack').onclick();
+ assert.equal(run('editor.tracks.length'),2);assert.equal(run('editor.score.settings.mode'),'harp');
+ run("editor.score.notes=[{s:2,e:3,k:'A',p:60,v:.8}];drawScore();activateTrack(0)");
+ assert.equal(run('JSON.stringify(editor.score)'),first);
+ assert(run("playbackNotes().some(n=>n.mode==='harp')"));
+ run("editor.tracks[0].comparison={...cloneScore(editor.score),notes:[{s:10,e:11,k:'S',p:62,v:.8}]};scorePlayback.position=2");
+ el('switchCompare').onclick();assert.equal(run('scorePlayback.position'),2);
+ assert.equal(run('editor.compare'),true);assert.equal(run('editor.score.notes.length'),pasted);
+ assert(run("playbackNotes().some(n=>n.s===10)"));assert(run("playbackNotes().some(n=>n.mode==='harp')"));
+ run('editor.tracks[1].muted=true');assert(!run("playbackNotes().some(n=>n.mode==='harp')"));
+ run('activateTrack(1)');assert.equal(run('editor.undo.length'),0);
+ run('activateTrack(0)');assert(run('editor.undo.length')>0);
+
+
+ run("stopScorePlayback();referenceAudio.buffer={duration:20};referenceAudio.offset=2;referenceAudio.volume=.4;scorePlayback.position=5");
+ await run("scorePlayback.enabled=true;startScorePlayback()");
+ let ref=contexts.at(-1).nodes[0];
+ assert.equal(ref.startTime,.05);assert.equal(ref.offset,7);
+ assert.equal(run('scoreEnd()'),18);
+ assert.equal(run('referenceAudio.gain.gain.value'),.4);
+ el('referenceMute').onclick();assert.equal(run('referenceAudio.gain.gain.value'),0);
+ el('referenceVolume').oninput({target:{value:25}});el('referenceMute').onclick();assert.equal(run('referenceAudio.gain.gain.value'),.25);
+ run("stopScorePlayback();referenceAudio.offset=-3;scorePlayback.position=1");
+ await run("scorePlayback.enabled=true;startScorePlayback()");
+ ref=contexts.at(-1).nodes[0];assert.equal(ref.startTime,2.05);assert.equal(ref.offset,0);
+ const refCtx=contexts.at(-1);run("seekScore(7)");assert(refCtx.closed);assert.equal(run('referenceAudio.gain'),null);
+ run("stopScorePlayback();referenceAudio.offset=0;editor.tracks=[];editor.active=-1;editor.score=null;scorePlayback.position=0");
+ await run("scorePlayback.enabled=true;startScorePlayback()");assert.equal(contexts.at(-1).nodes.length,1);
+ run("stopScorePlayback()");el('removeReference').onclick();assert.equal(run('referenceAudio.buffer'),null);
+ console.log('PASS: MP3 shared clock, seek cleanup, positive/negative offset, volume, mute and standalone playback.');
  console.log('PASS: playback, scrub, box intersections, group boundary/length preservation, batch deletion/undo/redo and control locking.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

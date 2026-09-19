@@ -8,7 +8,7 @@ STEPS = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19, 21, 23, 24]
 
 def settings(raw):
     mode = raw.get('mode', 'piano')
-    if mode not in ('piano', 'cello'):
+    if mode not in ('piano', 'cello', 'violin', 'harp'):
         raise ValueError('請選擇鋼琴或大提琴。')
     def number(key, default, low, high, integer=False):
         n = float(raw.get(key, default))

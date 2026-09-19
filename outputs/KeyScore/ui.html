@@ -49,10 +49,18 @@
 </div>
 <section id="editorPage" hidden class="card">
 <h1>編輯模式</h1><p>雙擊空白新增音符；拖曳移動時間與音高，拖曳音符右緣調整長短。也可用下方欄位精確修改。</p>
-<div class="editor-toolbar"><button id="importScore" class="secondary">匯入 Python</button><button id="useAnalysis" class="secondary">載入目前解析結果</button><button id="newScore" class="secondary">空白樂譜</button><button id="saveScore" class="primary">匯出 Python</button></div>
+<div class="editor-toolbar"><button id="importScore" class="secondary">匯入 Python</button><button id="useAnalysis" class="secondary">載入目前解析結果</button><button id="newScore" class="secondary">空白樂譜</button><button id="saveScore" class="primary">匯出目前樂器 Python</button></div>
 <p class="hint">支援含 KeyScore V1 標記的新格式腳本。僅讀取樂譜資料，不執行匯入的程式。舊版無標記腳本需重新解析。編輯的是遊戲可演奏的 15 鍵樂譜。</p>
 <div class="editor-toolbar"><label>曲名 <input id="scoreTitle" maxlength="500" value="未命名樂譜"></label><label>倒數（秒） <input id="scoreCountdown" type="number" min="3" max="30" value="5"></label><label>時間縮放 <select id="scoreZoom"><option value="40">40 px / 秒</option><option value="80" selected>80 px / 秒</option><option value="160">160 px / 秒</option></select></label><label>吸附 <select id="scoreSnap"><option value="0.05">0.05 秒</option><option value="0.1" selected>0.1 秒</option><option value="0.25">0.25 秒</option></select></label><button id="undoScore" class="secondary">復原</button><button id="redoScore" class="secondary">重做</button></div>
-<p id="scoreStatus" role="status">尚未載入樂譜。</p>
+<section aria-label="原始 MP3 參考音軌">
+<div class="editor-toolbar"><strong>原始 MP3 參考音軌</strong><button id="importReference" class="secondary">匯入／更換 MP3</button><input id="referenceFile" type="file" accept=".mp3,audio/mpeg" hidden><span id="referenceName">尚未匯入原曲</span><button id="removeReference" class="secondary">移除原曲</button></div>
+<div class="editor-toolbar"><button id="referenceMute" class="secondary" aria-pressed="false">🔊 原曲開啟</button><label>原曲音量 <input id="referenceVolume" type="range" min="0" max="100" value="50" aria-label="原曲音量"></label><output id="referenceVolumeLabel">50%</output><label>時間偏移（秒） <input id="referenceOffset" type="number" min="-1200" max="1200" step="0.01" value="0"></label></div>
+<p class="hint">與樂器共用下方試播、停止及紅色游標；拖曳時原曲暫停，放開後同步繼續。正偏移會略過原曲開頭，例如 +2 代表時間軸 0 秒播放 MP3 的第 2 秒；負偏移讓原曲延後開始。最多 50 MB／20 分鐘。原曲僅在本機試聽，不寫入匯出的 Python，關閉後需重新匯入。</p>
+</section>
+<div class="editor-toolbar"><label>目前樂器 <select id="trackInstrument"><option value="piano">鋼琴</option><option value="cello">大提琴</option><option value="violin">小提琴</option><option value="harp">豎琴</option></select></label><button id="addTrack" class="secondary">新增樂器音軌</button><button id="importComparison" class="secondary">匯入比較組 Python</button><button id="switchCompare" class="secondary">SWITCH · 編輯組</button><button id="copyNotes" class="secondary">複製 Ctrl+C</button><button id="pasteNotes" class="secondary">貼上 Ctrl+V</button></div>
+<div id="trackList" class="editor-toolbar" aria-label="樂器音軌及靜音開關"></div>
+<p class="hint">紫色背景為鎖定的比較组音符。SWITCH 在相同位置切換目前音軌的試聽來源，其餘樂器繼續合奏。所有樂器共用時間軸；喇叭只控制試聽。Ctrl+Z 復原，Ctrl+Y／Ctrl+Shift+Z 重做。貼上至紅色游標。</p>
+<p id="scoreStatus"  role="status">尚未載入樂譜。</p>
 <div class="editor-toolbar"><button id="scorePlay" class="primary" role="switch" aria-checked="false">試播 OFF</button><button id="scoreStop" class="secondary" disabled>停止</button><button id="scoreRewind" class="secondary">回到開頭</button><label>播放位置（秒） <input id="scorePosition" type="number" min="0" max="2400" step="0.05" value="0"></label><span id="scoreTime" aria-live="off">0.00 / 0.00 秒</span></div>
 <input id="scoreSeek" type="range" min="0" max="15" step="0.01" value="0" aria-label="拖曳調整試播起點" style="width:100%">
 <p class="hint">試播 ON：拖曳拉桿或紅色游標時短暫試聽當下音符，放開即從新位置繼續。OFF：靜音定位。使用合成音而非原始 MP3，不發送遊戲按鍵；編輯音符或離開頁面會關閉試播。</p>
